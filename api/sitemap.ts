@@ -16,21 +16,12 @@ import {
   getShelves,
   isShareableShelf,
 } from "../lib/shelves.ts";
-import { renderStaticPageHreflangLinks } from "../lib/sitemap-hreflang.ts";
+import {
+  escapeXml,
+  renderStaticPageHreflangLinks,
+} from "../lib/sitemap-hreflang.ts";
+import { staticPageAlternates } from "../src/i18n/pages.ts";
 import { getStorylineIndex } from "../lib/storylines.ts";
-
-// XML has five predefined entities and a URL can legitimately contain three of
-// them -- Commons filenames are the realistic source, since they are arbitrary
-// user-chosen text. An unescaped & alone makes the whole document malformed,
-// and a malformed sitemap is rejected wholesale rather than partially.
-function escapeXml(value: string): string {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
 
 const STATIC_PAGES = [
   { path: "/pages/about.html", priority: "0.8" },
@@ -78,15 +69,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     <priority>${priority}</priority>
   </url>
 `;
-    const staticEntries = STATIC_PAGES.map(
-      (page) => `  <url>
-    <loc>${escapeXml(origin + page.path)}</loc>
-${renderStaticPageHreflangLinks(page.path, origin)}
+    const staticEntries = STATIC_PAGES.flatMap((page) => {
+      const file = page.path.split("/").at(-1) ?? page.path;
+      const alternates = staticPageAlternates(file);
+      const paths =
+        alternates.length > 0
+          ? [...new Set(alternates.map((alternate) => alternate.path))]
+          : [page.path];
+      return paths.map(
+        (path) => `  <url>
+    <loc>${escapeXml(origin + path)}</loc>
+${renderStaticPageHreflangLinks(path, origin)}
     <changefreq>yearly</changefreq>
     <priority>${page.priority}</priority>
   </url>
 `,
-    );
+      );
+    });
     const entries = [
       entry("/", "daily", "1.0"),
       entry("/discover", "weekly", "0.8"),

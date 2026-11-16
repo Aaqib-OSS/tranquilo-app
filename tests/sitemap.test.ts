@@ -120,4 +120,33 @@ describe("/sitemap.xml", () => {
   it("rejects non-GET methods", async () => {
     expect((await get("POST")).statusCode).toBe(405);
   });
+
+  it("gives every translated URL the same reciprocal alternate set", async () => {
+    const xml = (await get()).body;
+    const entries = [...xml.matchAll(/<url>([\s\S]*?)<\/url>/g)].map(
+      (match) => match[1] ?? "",
+    );
+    const translatedEntries = entries.filter((body) =>
+      /<loc>https:\/\/tranquilo\.art\/pages\/(?:about\.html|pt-BR\/about\.html)<\/loc>/.test(
+        body,
+      ),
+    );
+    expect(translatedEntries).toHaveLength(2);
+
+    const alternates = (body: string) =>
+      [...body.matchAll(/<xhtml:link rel="alternate" hreflang="([^"]+)" href="([^"]+)"\/>/g)].map(
+        ([, hreflang, href]) => [hreflang, href],
+      );
+    const expected = alternates(translatedEntries[0]);
+    expect(expected).toEqual([
+      ["en", "https://tranquilo.art/pages/about.html"],
+      ["pt-BR", "https://tranquilo.art/pages/pt-BR/about.html"],
+      ["x-default", "https://tranquilo.art/pages/about.html"],
+    ]);
+    for (const body of translatedEntries) {
+      expect(alternates(body)).toEqual(expected);
+      const loc = body.match(/<loc>([^<]+)<\/loc>/)?.[1];
+      expect(expected.some(([, href]) => href === loc)).toBe(true);
+    }
+  });
 });
