@@ -508,6 +508,9 @@ class TranquiloApp {
       shareItem: (item) => {
         shareItem(item);
       },
+      openLightbox: (src, alt, item) => {
+        lightboxEl.open(src, alt, item);
+      },
       sourceLinkLabel: (item) => sourceLinkLabel(item),
       sourceLinkText: (item) => sourceLinkText(item),
       setArtistFilter: (artist) => {

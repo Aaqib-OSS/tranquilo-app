@@ -945,8 +945,19 @@ export class TranquiloDetailModal extends HTMLElement {
         item,
         "display",
       );
-      on(dFrame, () => {
-        if (dImageState.isFailed()) dImageState.retry();
+      on(dFrame, (event) => {
+        if (event.target !== dImg && dImageState.isFailed()) {
+          dImageState.retry();
+        }
+      });
+      on(dImg, (event) => {
+        if (dFrame.classList.contains("nudity-gated")) return;
+        if (dImageState.isFailed()) {
+          dImageState.retry();
+          event.stopPropagation();
+          return;
+        }
+        host.openLightbox(item.img, item.title || t("common.untitled"), item);
       });
     }
     const shareBtn = container.querySelector<HTMLButtonElement>(".btn-share");
