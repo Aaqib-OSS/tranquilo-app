@@ -20,8 +20,8 @@ import {
   escapeXml,
   renderStaticPageHreflangLinks,
 } from "../lib/sitemap-hreflang.ts";
-import { staticPageAlternates } from "../src/i18n/pages.ts";
 import { getStorylineIndex } from "../lib/storylines.ts";
+import { staticPageAlternates } from "../src/i18n/pages.ts";
 
 const STATIC_PAGES = [
   { path: "/pages/about.html", priority: "0.8" },

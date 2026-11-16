@@ -134,9 +134,11 @@ describe("/sitemap.xml", () => {
     expect(translatedEntries).toHaveLength(2);
 
     const alternates = (body: string) =>
-      [...body.matchAll(/<xhtml:link rel="alternate" hreflang="([^"]+)" href="([^"]+)"\/>/g)].map(
-        ([, hreflang, href]) => [hreflang, href],
-      );
+      [
+        ...body.matchAll(
+          /<xhtml:link rel="alternate" hreflang="([^"]+)" href="([^"]+)"\/>/g,
+        ),
+      ].map(([, hreflang, href]) => [hreflang, href]);
     const expected = alternates(translatedEntries[0]);
     expect(expected).toEqual([
       ["en", "https://tranquilo.art/pages/about.html"],
