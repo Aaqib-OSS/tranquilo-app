@@ -23,7 +23,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { neon } from "@neondatabase/serverless";
-import { planApply } from "../lib/vibe-tag-batch.ts";
+import {
+  planApply,
+  type VibeTagCandidate,
+  type VibeTagItemRow,
+} from "../lib/vibe-tag-batch.ts";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const AUDIT_DIR = path.join(ROOT, "data/reference/vibe-tag-audits");
@@ -48,7 +52,9 @@ const sql = neon(process.env.DATABASE_URL!);
 
 async function main() {
   const batchPath = path.resolve(file);
-  const batch = JSON.parse(fs.readFileSync(batchPath, "utf8"));
+  const batch: { candidates?: VibeTagCandidate[] } = JSON.parse(
+    fs.readFileSync(batchPath, "utf8"),
+  );
   const candidates = batch.candidates || [];
   console.log(
     `${candidates.length} candidate(s) in ${path.relative(ROOT, batchPath)}`,
@@ -59,12 +65,12 @@ async function main() {
     return;
   }
 
-  const ids = candidates.map((c: any) => c.id);
-  const rows = await sql.query(
+  const ids = candidates.map((c) => c.id);
+  const rows = (await sql.query(
     `SELECT id, vibe_tags, review_status FROM items WHERE id = ANY($1)`,
     [ids],
-  );
-  const byId = new Map(rows.map((r: any) => [r.id, r]));
+  )) as VibeTagItemRow[];
+  const byId = new Map(rows.map((r) => [r.id, r]));
 
   const { plan, problems } = planApply(candidates, byId);
   if (problems.length) {
@@ -123,7 +129,7 @@ async function main() {
   console.log(`${updated} row(s) updated.`);
 }
 
-main().catch((e) => {
-  console.error("FATAL", e?.message || e);
+main().catch((e: unknown) => {
+  console.error("FATAL", e instanceof Error ? e.message : e);
   process.exit(1);
 });
