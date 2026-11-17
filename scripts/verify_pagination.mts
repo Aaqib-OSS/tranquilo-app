@@ -9,13 +9,7 @@
 //
 // Run:  node scripts/verify_pagination.mts
 //       node scripts/verify_pagination.mts --api http://localhost:3000/api/items
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { resolveApi, fetchManifest, apiFetch } = await import(
-  path.join(__dirname, "../lib/catalogue.ts")
-);
+import { apiFetch, fetchManifest, resolveApi } from "../lib/catalogue.ts";
 
 const API = resolveApi();
 
@@ -45,7 +39,10 @@ while (pages < MAX_PAGES) {
   }`;
   const res: Response = await apiFetch(url);
   if (!res.ok) throw new Error(`${url} responded ${res.status}`);
-  const body: any = await res.json();
+  const body: {
+    items: { source: string; id: string }[];
+    next_cursor?: string;
+  } = await res.json();
   pages++;
 
   for (const item of body.items) {
