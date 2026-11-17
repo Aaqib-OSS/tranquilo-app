@@ -39,6 +39,7 @@ export interface ITranquiloDetailModalHost {
   // its panel is about to be read rather than carried on every page row.
   fetchItemDetail(item: Item): Promise<ItemDetail>;
   shareItem(item: Item): void;
+  openLightbox(src: string, alt: string, item: Item): void;
   sourceLinkLabel(item: Item): string;
   sourceLinkText(item: Item): string;
   setArtistFilter(artist: string): void;

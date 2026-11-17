@@ -63,6 +63,11 @@ describe("buildIntroSlide", () => {
     const el = buildIntroSlide({});
     expect(el.innerHTML).toContain("0 museums and more");
   });
+
+  it("keeps the donations flag on the whole Support card", () => {
+    const html = buildIntroSlide({}).innerHTML;
+    expect(html).toMatch(/<div class="action-card" data-donations>/);
+  });
 });
 
 describe("buildEmptyCollectionSlide", () => {
