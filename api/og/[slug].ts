@@ -11,6 +11,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { ImageResponse as OgImageResponse } from "@vercel/og";
 import { getSql } from "../../lib/db.ts";
+import { configFromEnv, resolveHit } from "../../lib/img-store.ts";
 import { rateLimitOrRespond } from "../../lib/img-visitor-rate-limit.ts";
 import { LIVE_ITEMS_AND } from "../../lib/items-sql.ts";
 import { reportError } from "../../lib/sentry.ts";
@@ -33,6 +34,7 @@ type CardFonts = NonNullable<
 
 interface ItemRow {
   source: string;
+  native_id?: string | null;
   img?: string | null;
   title?: string | null;
   artist?: string | null;
@@ -199,6 +201,33 @@ async function fetchImageDataUri(url: string, source: string) {
     return `data:${contentType};base64,${Buffer.from(buf).toString("base64")}`;
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+// Prefers our own stored copy of the display tier: it is already ours to
+// serve, and institutions can bot-challenge a server-side fetch of the origin.
+async function cardImageDataUri(
+  client: ReturnType<typeof getSql>,
+  row: ItemRow,
+): Promise<string | null> {
+  if (!row.img) return null;
+  const cdnBaseUrl = configFromEnv().cdnBaseUrl;
+  if (client && cdnBaseUrl && row.native_id) {
+    try {
+      const entries = (await client.query(
+        "SELECT object_key FROM img_cache_entries WHERE cache_key = $1 AND object_key IS NOT NULL",
+        [`${row.source}:${row.native_id}:display`],
+      )) as { object_key: string }[];
+      const hit = resolveHit(entries[0], { cdnBaseUrl });
+      if (hit.from === "cdn") return await fetchImageDataUri(hit.url, "cdn");
+    } catch (_e) {
+      // fall through to the origin
+    }
+  }
+  try {
+    return await fetchImageDataUri(row.img, row.source);
+  } catch (_e) {
+    return null;
   }
 }
 
@@ -453,11 +482,7 @@ async function coverDataUriFor(
   if (!cover?.img) return null;
   const held = await sourceHealth.heldSourceSet(client, [cover.source]);
   if (held[cover.source]) return null;
-  try {
-    return await fetchImageDataUri(cover.img, cover.source);
-  } catch (_e) {
-    return null;
-  }
+  return cardImageDataUri(client, cover);
 }
 
 function buildFallbackCard(message: string) {
@@ -494,7 +519,7 @@ function buildFallbackCard(message: string) {
   );
 }
 
-export { fetchImageDataUri };
+export { cardImageDataUri, fetchImageDataUri };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -549,11 +574,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // than being fetched from our servers on every unfurl.
           const held = await sourceHealth.heldSourceSet(client, [cover.source]);
           if (!held[cover.source]) {
-            try {
-              coverDataUri = await fetchImageDataUri(cover.img, cover.source);
-            } catch (_e) {
-              coverDataUri = null;
-            }
+            coverDataUri = await cardImageDataUri(client, cover);
           }
         }
         tree0 = buildStorylineCard(
@@ -659,18 +680,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tree = buildFallbackCard("Tranquilo");
     } else {
       let imageDataUri: string | null = null;
-      // item.img is the raw origin URL, not the /img proxy URL --
-      // fetched directly from the source institution on every unfurl,
-      // so a held source is skipped for a text-only card instead.
+      // A held source is skipped for a text-only card instead.
       const heldSources = await sourceHealth.heldSourceSet(client, [
         item.source,
       ]);
       if (item.img && !heldSources[item.source]) {
-        try {
-          imageDataUri = await fetchImageDataUri(item.img, item.source);
-        } catch (_e) {
-          imageDataUri = null; // fall back to the text-only layout below
-        }
+        imageDataUri = await cardImageDataUri(client, item);
       }
       tree = buildCard(item, imageDataUri);
     }
