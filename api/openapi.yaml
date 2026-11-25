@@ -711,7 +711,7 @@ paths:
         Generated per-request (rewritten from `/sitemap.xml` to
         `/api/sitemap`) rather than checked in, since shelves and storylines
         change without a deploy. Lists the home page, static pages,
-        `/discover`, category landing pages, shelves and storylines.
+        `/discover`, category landing pages (/v/category-{slug}), shelves and storylines.
         Individual artworks are not listed.
       responses:
         "200":

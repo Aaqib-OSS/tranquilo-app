@@ -354,7 +354,7 @@ function sendCategoryPage(res: VercelResponse, origin: string, slug: string) {
     ),
     ogTitle: `${escapeHtml(name)} · Tranquilo`,
     ogImage: `${origin}/og/${encodeURIComponent(slug)}.png`,
-    canonicalUrl: `${origin}/category/${slug.slice(CATEGORY_SLUG_PREFIX.length)}`,
+    canonicalUrl: `${origin}/v/${slug}`,
     redirectUrl: `${origin}/index.html`,
     statusNote: "Opening Tranquilo…",
   };
