@@ -15,8 +15,11 @@ import {
   ALERT_EMAILS_PER_HOUR,
   flagHeavyReader,
   heavyReaderMessage,
+  type RefusableKind,
+  refusedVisitorMessage,
   repeatedlyRefusedMessage,
   sendOpsEmail,
+  servedToVisitor,
   VISITOR_DENIED_COST_MIN,
   VOLUME_CHECK_FLOOR,
 } from "./items-abuse-alert.ts";
@@ -170,8 +173,9 @@ const ALERT_LIMITS: Limits = {
 async function raiseAlert(
   sql: QuerySql,
   message: { subject: string; text: string },
+  bucket = "all",
 ): Promise<void> {
-  const budget = await acquireBudget(sql, "all", 1, ALERT_LIMITS, "alert");
+  const budget = await acquireBudget(sql, bucket, 1, ALERT_LIMITS, "alert");
   if (!budget.allowed) return;
   await sendOpsEmail(message.subject, message.text);
 }
@@ -184,6 +188,22 @@ async function watchVolume(
   if (verdict.flagged || (verdict.spent ?? 0) < VOLUME_CHECK_FLOOR) return;
   const reader = await flagHeavyReader(sql, visitor);
   if (reader) await raiseAlert(sql, heavyReaderMessage(reader));
+}
+
+async function watchRefused(
+  sql: QuerySql,
+  visitor: string,
+  kind: RefusableKind,
+  refusedCost: number,
+  retryAfter: number,
+): Promise<void> {
+  const served = await servedToVisitor(sql, visitor, kind);
+  if (served === null) return;
+  await raiseAlert(
+    sql,
+    refusedVisitorMessage({ kind, served, refusedCost, retryAfter }),
+    "refused",
+  );
 }
 
 // True when the 429 has been sent and the caller must return. While
@@ -258,6 +278,9 @@ async function rateLimitOrRespond(
     1,
     Math.ceil(Math.min(cost, limits.capacity) / limits.refill_per_sec),
   );
+  if (deniedToday === cost && (kind === "items" || kind === "quote")) {
+    await watchRefused(sql, visitor, kind, cost, retryAfter);
+  }
   res.statusCode = 429;
   res.setHeader("Retry-After", String(retryAfter));
   res.setHeader("Cache-Control", "no-store");

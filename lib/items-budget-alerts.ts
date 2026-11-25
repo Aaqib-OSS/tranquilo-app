@@ -1,7 +1,7 @@
 // Read by the daily health-check cron. Returns human-readable lines, empty
 // when there is nothing to say; a check that throws reports nothing.
 //
-// The daily summary of visitors the budget refused. Visitors reading heavily
+// The daily summary of visitors the budget refused, however briefly. Visitors reading heavily
 // without being refused are caught by the real-time alerts in
 // items-abuse-alert.ts.
 import type { QuerySql } from "./img-store.ts";
@@ -33,6 +33,7 @@ export async function checkItemsBudgetDenials(
         " FROM items_budget_events WHERE day = CURRENT_DATE - 1 " +
         " GROUP BY kind " +
         " HAVING count(*) FILTER (WHERE denied_cost >= $1) > 0 OR count(*) >= $2 " +
+        "   OR count(*) FILTER (WHERE enforced) > 0 " +
         " ORDER BY kind",
       [VISITOR_DENIED_COST_MIN, VISITORS_DENIED_MIN],
     )) as DenialSummary[];
