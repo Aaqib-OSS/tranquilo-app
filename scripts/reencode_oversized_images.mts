@@ -17,6 +17,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as objectKey from "../lib/img-object-key.ts";
+import { opt as readOpt } from "./lib/cli-opt.mts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -94,10 +95,7 @@ async function runCli() {
   const s3 = await import(pathToFileURL(path.join(ROOT, "lib/img-s3.ts")).href);
 
   const args = process.argv.slice(2);
-  const optOf = (n: string, d: number) => {
-    const i = args.indexOf(`--${n}`);
-    return i === -1 ? d : args[i + 1];
-  };
+  const optOf = (n: string, d: number): string | number => readOpt(args, n, d);
   const COMMIT = args.includes("--commit");
   const MIN_BYTES = Number(optOf("min-bytes", DEFAULT_MIN_BYTES));
   const LIMIT = Number(optOf("limit", 0)) || null;
