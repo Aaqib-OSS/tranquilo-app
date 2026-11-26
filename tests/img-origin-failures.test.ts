@@ -1,6 +1,6 @@
 /* The origin failure matrix, against a real server -- previously required
  * asking a museum to fail for us (see tests/helpers/origin.ts). Drives
- * fetchOriginOnce() directly, not the whole handler, isolating what the
+ * fetchFollowingRedirectsUnchecked() directly, not the whole handler, isolating what the
  * proxy does with what an origin sends back; what the handler does with
  * the thrown error is covered in img-guard-atomicity.test.ts and
  * img-proxy.test.ts.
@@ -13,8 +13,13 @@
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as guard from "../lib/img-fetch-guard.ts";
+import { fetchFollowingRedirectsUnchecked } from "../lib/img-origin-fetch.ts";
 import * as identity from "../lib/source-identity.ts";
 import { startFakeOrigin } from "./helpers/origin.ts";
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
 
 const proxy = await import("../api/img/[source]/[id]/[tier].ts");
 
@@ -35,7 +40,7 @@ describe("a healthy origin", () => {
       headers: { "content-type": "image/jpeg" },
       body: JPEG,
     }));
-    const out = await proxy.fetchOriginOnce(origin.url(), "met");
+    const out = await fetchFollowingRedirectsUnchecked(origin.url(), "met");
     expect(Buffer.compare(out.buf, JPEG)).toBe(0);
     expect(out.contentType).toBe("image/jpeg");
   });
@@ -47,7 +52,7 @@ describe("a healthy origin", () => {
       body: JPEG,
       headers: {},
     }));
-    const out = await proxy.fetchOriginOnce(origin.url(), "met");
+    const out = await fetchFollowingRedirectsUnchecked(origin.url(), "met");
     expect(out.contentType).toBeTruthy();
   });
 });
@@ -58,7 +63,7 @@ describe("we identify ourselves to the institution", () => {
     // an institution anonymously, the one kind of request an operator can
     // only throttle or block.
     origin = await startFakeOrigin(() => ({ status: 200, body: JPEG }));
-    await proxy.fetchOriginOnce(origin.url(), "met");
+    await fetchFollowingRedirectsUnchecked(origin.url(), "met");
     const ua = origin.requests[0].headers["user-agent"];
     expect(ua).toBe(identity.USER_AGENT);
     expect(ua).toContain("Tranquilo");
@@ -68,7 +73,7 @@ describe("we identify ourselves to the institution", () => {
   it("sends the Wikimedia-shaped identity for commons", async () => {
     // Wikimedia asks for the tool's purpose alongside the contact.
     origin = await startFakeOrigin(() => ({ status: 200, body: JPEG }));
-    await proxy.fetchOriginOnce(origin.url(), "commons");
+    await fetchFollowingRedirectsUnchecked(origin.url(), "commons");
     expect(origin.requests[0].headers["user-agent"]).toBe(
       identity.WIKIMEDIA_USER_AGENT,
     );
@@ -76,7 +81,7 @@ describe("we identify ourselves to the institution", () => {
 
   it("sends an Accept header, so a WAF does not read us as a scraper", async () => {
     origin = await startFakeOrigin(() => ({ status: 200, body: JPEG }));
-    await proxy.fetchOriginOnce(origin.url(), "met");
+    await fetchFollowingRedirectsUnchecked(origin.url(), "met");
     expect(origin.requests[0].headers.accept).toContain("image/");
   });
 });
@@ -90,20 +95,22 @@ describe("an origin that refuses", () => {
       body: "unavailable",
     }));
     await expect(
-      proxy.fetchOriginOnce(origin.url(), "met"),
+      fetchFollowingRedirectsUnchecked(origin.url(), "met"),
     ).rejects.toMatchObject({ status: 503 });
   });
 
   it("throws with the status attached, for a 404", async () => {
     origin = await startFakeOrigin(() => ({ status: 404, body: "gone" }));
     await expect(
-      proxy.fetchOriginOnce(origin.url(), "met"),
+      fetchFollowingRedirectsUnchecked(origin.url(), "met"),
     ).rejects.toMatchObject({ status: 404 });
   });
 
   it("does not treat a 3xx body as a success", async () => {
     origin = await startFakeOrigin(() => ({ status: 304, body: "" }));
-    await expect(proxy.fetchOriginOnce(origin.url(), "met")).rejects.toThrow();
+    await expect(
+      fetchFollowingRedirectsUnchecked(origin.url(), "met"),
+    ).rejects.toThrow();
   });
 });
 
@@ -120,7 +127,7 @@ describe("an origin that answers 200 with something that is not an image", () =>
       body: "<html><body>Object not found</body></html>",
     }));
     await expect(
-      proxy.fetchOriginOnce(origin.url(), "europeana"),
+      fetchFollowingRedirectsUnchecked(origin.url(), "europeana"),
     ).rejects.toMatchObject({ status: 200 });
   });
 
@@ -132,7 +139,7 @@ describe("an origin that answers 200 with something that is not an image", () =>
       body: JPEG,
       headers: {},
     }));
-    const out = await proxy.fetchOriginOnce(origin.url(), "met");
+    const out = await fetchFollowingRedirectsUnchecked(origin.url(), "met");
     expect(Buffer.compare(out.buf, JPEG)).toBe(0);
   });
 });
@@ -148,7 +155,7 @@ describe("an origin that answers 200 with a non-raster type", () => {
       body,
     }));
     await expect(
-      proxy.fetchOriginOnce(origin.url(), "met"),
+      fetchFollowingRedirectsUnchecked(origin.url(), "met"),
     ).rejects.toMatchObject({ status: 200 });
   });
 
@@ -170,7 +177,7 @@ describe("an origin that answers 200 with a non-raster type", () => {
         headers: { "content-type": type },
         body,
       }));
-      const out = await proxy.fetchOriginOnce(origin.url(), "met");
+      const out = await fetchFollowingRedirectsUnchecked(origin.url(), "met");
       expect(out.buf.length).toBe(body.length);
       await origin.close();
       origin = null;
@@ -199,8 +206,10 @@ describe("an origin that answers 200 with a non-raster type", () => {
         headers: sendHeader ? { "content-type": String(type) } : {},
         body: corrupt,
       }));
-      const outcome = await proxy
-        .fetchOriginOnce(origin.url(), "met")
+      const outcome = await fetchFollowingRedirectsUnchecked(
+        origin.url(),
+        "met",
+      )
         .then((out: { contentType: string }) => out.contentType)
         .catch(() => "rejected");
       expect(["image/png", "rejected"]).toContain(outcome);
@@ -213,7 +222,7 @@ describe("an origin that answers 200 with a non-raster type", () => {
       headers: { "content-type": "image/jpg" },
       body: JPEG,
     }));
-    const out = await proxy.fetchOriginOnce(origin.url(), "met");
+    const out = await fetchFollowingRedirectsUnchecked(origin.url(), "met");
     expect(out.contentType).toBe("image/jpeg");
   });
 
@@ -223,7 +232,9 @@ describe("an origin that answers 200 with a non-raster type", () => {
       headers: { "content-type": "image/jpeg" },
       body: "  <svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>",
     }));
-    await expect(proxy.fetchOriginOnce(origin.url(), "met")).rejects.toThrow();
+    await expect(
+      fetchFollowingRedirectsUnchecked(origin.url(), "met"),
+    ).rejects.toThrow();
   });
 
   it("rejects SVG markup even when it claims to be a PNG", async () => {
@@ -232,7 +243,9 @@ describe("an origin that answers 200 with a non-raster type", () => {
       headers: { "content-type": "image/png" },
       body: '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>',
     }));
-    await expect(proxy.fetchOriginOnce(origin.url(), "met")).rejects.toThrow();
+    await expect(
+      fetchFollowingRedirectsUnchecked(origin.url(), "met"),
+    ).rejects.toThrow();
   });
 
   it("rejects a missing content-type when the body is not a raster", async () => {
@@ -241,7 +254,9 @@ describe("an origin that answers 200 with a non-raster type", () => {
       headers: {},
       body: Buffer.from("not an image at all"),
     }));
-    await expect(proxy.fetchOriginOnce(origin.url(), "met")).rejects.toThrow();
+    await expect(
+      fetchFollowingRedirectsUnchecked(origin.url(), "met"),
+    ).rejects.toThrow();
   });
 
   it.each(["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif"])(
@@ -252,7 +267,7 @@ describe("an origin that answers 200 with a non-raster type", () => {
         headers: { "content-type": `${type}; charset=binary` },
         body: JPEG,
       }));
-      const out = await proxy.fetchOriginOnce(origin.url(), "met");
+      const out = await fetchFollowingRedirectsUnchecked(origin.url(), "met");
       expect(out.contentType).toContain(type);
     },
   );
@@ -279,7 +294,7 @@ describe("origin redirects", () => {
     const fetchMock = redirectTo(target);
     vi.stubGlobal("fetch", fetchMock);
     await expect(
-      proxy.fetchOriginOnce(
+      fetchFollowingRedirectsUnchecked(
         "https://images.example-museum.nl/start.jpg",
         "europeana",
         "lightbox",
@@ -295,7 +310,7 @@ describe("origin redirects", () => {
   ])("refuses a same-host redirect to %s", async (target) => {
     vi.stubGlobal("fetch", redirectTo(target));
     await expect(
-      proxy.fetchOriginOnce("https://www.artic.edu/a.jpg", "aic"),
+      fetchFollowingRedirectsUnchecked("https://www.artic.edu/a.jpg", "aic"),
     ).rejects.toThrow(/redirect refused/);
   });
 
@@ -317,7 +332,10 @@ describe("origin redirects", () => {
       ),
     );
     await expect(
-      proxy.fetchOriginOnce("https://images.metmuseum.org/a.jpg", "met"),
+      fetchFollowingRedirectsUnchecked(
+        "https://images.metmuseum.org/a.jpg",
+        "met",
+      ),
     ).rejects.toThrow(/redirect refused/);
     expect(cancelled).toBe(true);
   });
@@ -325,7 +343,10 @@ describe("origin redirects", () => {
   it("refuses a redirect off the source's allowlisted hosts", async () => {
     vi.stubGlobal("fetch", redirectTo("https://evil.example/a.jpg"));
     await expect(
-      proxy.fetchOriginOnce("https://images.metmuseum.org/a.jpg", "met"),
+      fetchFollowingRedirectsUnchecked(
+        "https://images.metmuseum.org/a.jpg",
+        "met",
+      ),
     ).rejects.toThrow(/redirect refused/);
   });
 
@@ -345,7 +366,7 @@ describe("origin redirects", () => {
         }),
       );
     vi.stubGlobal("fetch", hops);
-    const out = await proxy.fetchOriginOnce(
+    const out = await fetchFollowingRedirectsUnchecked(
       "https://images.metmuseum.org/a.jpg",
       "met",
     );
@@ -363,7 +384,10 @@ describe("origin redirects", () => {
       ),
     );
     await expect(
-      proxy.fetchOriginOnce("https://images.metmuseum.org/a.jpg", "met"),
+      fetchFollowingRedirectsUnchecked(
+        "https://images.metmuseum.org/a.jpg",
+        "met",
+      ),
     ).rejects.toThrow(/too many hops/);
   });
 });
@@ -377,9 +401,10 @@ describe("a 429, which is the failure this whole subsystem exists for", () => {
       headers: { "retry-after": "120" },
       body: "slow down",
     }));
-    const err = await proxy
-      .fetchOriginOnce(origin.url(), "europeana")
-      .catch((e: any) => e);
+    const err = await fetchFollowingRedirectsUnchecked(
+      origin.url(),
+      "europeana",
+    ).catch((e: any) => e);
     expect(err.status).toBe(429);
     expect(err.retryAfter).toBe("120");
   });
@@ -391,17 +416,19 @@ describe("a 429, which is the failure this whole subsystem exists for", () => {
       headers: { "retry-after": when },
       body: "",
     }));
-    const err = await proxy
-      .fetchOriginOnce(origin.url(), "europeana")
-      .catch((e: any) => e);
+    const err = await fetchFollowingRedirectsUnchecked(
+      origin.url(),
+      "europeana",
+    ).catch((e: any) => e);
     expect(err.retryAfter).toBe(when);
   });
 
   it("still throws a 429 when the header is absent", async () => {
     origin = await startFakeOrigin(() => ({ status: 429, body: "" }));
-    const err = await proxy
-      .fetchOriginOnce(origin.url(), "europeana")
-      .catch((e: any) => e);
+    const err = await fetchFollowingRedirectsUnchecked(
+      origin.url(),
+      "europeana",
+    ).catch((e: any) => e);
     expect(err.status).toBe(429);
     expect(err.retryAfter == null).toBe(true);
   });
@@ -414,9 +441,10 @@ describe("a 429, which is the failure this whole subsystem exists for", () => {
       headers: { "retry-after": "90" },
       body: "",
     }));
-    const err = await proxy
-      .fetchOriginOnce(origin.url(), "europeana")
-      .catch((e: any) => e);
+    const err = await fetchFollowingRedirectsUnchecked(
+      origin.url(),
+      "europeana",
+    ).catch((e: any) => e);
     expect(guard.parseRetryAfter(err.retryAfter, 300)).toBe(90);
   });
 });
@@ -446,7 +474,7 @@ describe("oversized origin responses", () => {
       };
     });
     await expect(
-      proxy.fetchOriginOnce(origin.url(), "cleveland"),
+      fetchFollowingRedirectsUnchecked(origin.url(), "cleveland"),
     ).rejects.toMatchObject({ tooLarge: true });
   });
 
@@ -461,7 +489,7 @@ describe("oversized origin responses", () => {
       headers: { "content-length": String(size), "content-type": "image/jpeg" },
       body: big(size),
     }));
-    const out = await proxy.fetchOriginOnce(origin.url(), "met");
+    const out = await fetchFollowingRedirectsUnchecked(origin.url(), "met");
     expect(out.buf.length).toBe(size);
   });
 
@@ -475,7 +503,7 @@ describe("oversized origin responses", () => {
       body: big(oversize),
     }));
     await expect(
-      proxy.fetchOriginOnce(origin.url(), "cleveland"),
+      fetchFollowingRedirectsUnchecked(origin.url(), "cleveland"),
     ).rejects.toMatchObject({ tooLarge: true });
   });
 
@@ -485,7 +513,7 @@ describe("oversized origin responses", () => {
       headers: { "content-type": "image/jpeg" },
       body: big(300 * 1024),
     }));
-    const out = await proxy.fetchOriginOnce(origin.url(), "met");
+    const out = await fetchFollowingRedirectsUnchecked(origin.url(), "met");
     expect(out.buf.length).toBe(300 * 1024);
   });
 
