@@ -31,6 +31,7 @@
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { sourcesToWarm, warmBatch } from "../lib/img-warm.ts";
+import { opt as readOpt } from "./lib/cli-opt.mts";
 
 export * from "../lib/img-warm.ts";
 
@@ -70,10 +71,8 @@ async function runCli() {
   const s3 = await import(pathToFileURL(path.join(ROOT, "lib/img-s3.ts")).href);
 
   const args = process.argv.slice(2);
-  const opt = (name: string, fallback: string | null) => {
-    const i = args.indexOf(`--${name}`);
-    return i === -1 ? fallback : args[i + 1];
-  };
+  const opt = <T,>(name: string, fallback: T): string | T =>
+    readOpt(args, name, fallback);
   const COMMIT = args.includes("--commit");
   const SOURCE = opt("source", null);
   const TIER = opt("tier", "display");

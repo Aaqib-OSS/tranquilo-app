@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { neon } from "@neondatabase/serverless";
 import * as wd from "../lib/wikidata-client.ts";
+import { opt as readOpt } from "./lib/cli-opt.mts";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -30,10 +31,8 @@ const STORE = path.join(ROOT, "data/reference/wikidata-artists.json");
 const BATCH = 20; // names per query: one request answers a whole cluster tier
 
 const args = process.argv.slice(2);
-const opt = (n: string, d: string | null = null) => {
-  const i = args.indexOf(`--${n}`);
-  return i === -1 ? d : args[i + 1];
-};
+const opt = (n: string, d: string | null = null): string | null =>
+  readOpt(args, n, d);
 const DRY = args.includes("--dry-run");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
