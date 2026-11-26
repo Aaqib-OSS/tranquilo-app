@@ -2,6 +2,7 @@
 // lib/img-visitor-rate-limit.ts and sql/035_visitor_rate_state.sql
 // for why this exists.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { TRANQUILO_CONFIG } from "../lib/config.generated.ts";
 import * as rateLimit from "../lib/img-visitor-rate-limit.ts";
 
 function fakeSql(results: any) {
@@ -61,6 +62,16 @@ describe("acquireVisitorToken", () => {
     expect(statement).toMatch(/ON CONFLICT \(ip\) DO UPDATE/);
   });
 
+  it("starts a new visitor's bucket from the configured limits", async () => {
+    const sql = fakeSql([[{ tokens: 1 }]]);
+    await rateLimit.acquireVisitorToken(sql, "203.0.113.7");
+    const { capacity, refill_per_sec } =
+      TRANQUILO_CONFIG.img_visitor_rate_limit;
+    expect(sql.calls[0].params).toEqual(
+      expect.arrayContaining([capacity, refill_per_sec]),
+    );
+  });
+
   it("FAILS OPEN on a database error -- the opposite of the origin-side guards", async () => {
     // This protects our own budget from a visitor, not a museum's server
     // from us; a database we can't reach is not a reason to 429 everyone.
@@ -84,43 +95,6 @@ describe("acquireVisitorToken", () => {
       allowed: true,
       reason: "no-db-or-ip",
     });
-  });
-});
-
-describe("clientIp", () => {
-  it("reads the first address out of x-forwarded-for", () => {
-    expect(
-      rateLimit.clientIp({
-        headers: { "x-forwarded-for": "203.0.113.7, 10.0.0.1" },
-      }),
-    ).toBe("203.0.113.7");
-  });
-
-  it("trims whitespace around the first address", () => {
-    expect(
-      rateLimit.clientIp({
-        headers: { "x-forwarded-for": "  203.0.113.7 , 10.0.0.1" },
-      }),
-    ).toBe("203.0.113.7");
-  });
-
-  it("handles a header array as Node sometimes provides", () => {
-    expect(
-      rateLimit.clientIp({
-        headers: { "x-forwarded-for": ["203.0.113.7", "10.0.0.1"] },
-      }),
-    ).toBe("203.0.113.7");
-  });
-
-  it("falls back to x-real-ip when x-forwarded-for is absent", () => {
-    expect(
-      rateLimit.clientIp({ headers: { "x-real-ip": "203.0.113.9" } }),
-    ).toBe("203.0.113.9");
-  });
-
-  it("returns null rather than guessing when neither header is present", () => {
-    expect(rateLimit.clientIp({ headers: {} })).toBe(null);
-    expect(rateLimit.clientIp({})).toBe(null);
   });
 });
 

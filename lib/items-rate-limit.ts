@@ -8,15 +8,18 @@
 // to refuse every visitor. Responses served from the edge cache never reach
 // this check.
 
+import { clientIp } from "./client-ip.ts";
 import { TRANQUILO_CONFIG } from "./config.generated.ts";
 import type { QuerySql } from "./img-store.ts";
-import { clientIp } from "./img-visitor-rate-limit.ts";
 import {
   ALERT_EMAILS_PER_HOUR,
   flagHeavyReader,
   heavyReaderMessage,
+  type RefusableKind,
+  refusedVisitorMessage,
   repeatedlyRefusedMessage,
   sendOpsEmail,
+  servedToVisitor,
   VISITOR_DENIED_COST_MIN,
   VOLUME_CHECK_FLOOR,
 } from "./items-abuse-alert.ts";
@@ -40,6 +43,7 @@ interface CostedQuery {
 
 interface RequestWithHeaders {
   headers?: Record<string, string | string[] | undefined>;
+  socket?: { remoteAddress?: string | null } | null;
 }
 
 interface RateLimitResponse {
@@ -71,7 +75,7 @@ export const ACQUIRE_SQL =
   "      * visitor_fetch_state.refill_per_sec) >= $2::real " +
   "RETURNING tokens, spent, flagged_at";
 
-type BudgetKind = "items" | "detail" | "quote" | "alert";
+type BudgetKind = "items" | "detail" | "quote" | "alert" | `write:${string}`;
 
 const configured = (): Limits => TRANQUILO_CONFIG.items_visitor_rate_limit;
 const configuredDetail = (): Limits =>
@@ -170,8 +174,9 @@ const ALERT_LIMITS: Limits = {
 async function raiseAlert(
   sql: QuerySql,
   message: { subject: string; text: string },
+  bucket = "all",
 ): Promise<void> {
-  const budget = await acquireBudget(sql, "all", 1, ALERT_LIMITS, "alert");
+  const budget = await acquireBudget(sql, bucket, 1, ALERT_LIMITS, "alert");
   if (!budget.allowed) return;
   await sendOpsEmail(message.subject, message.text);
 }
@@ -184,6 +189,22 @@ async function watchVolume(
   if (verdict.flagged || (verdict.spent ?? 0) < VOLUME_CHECK_FLOOR) return;
   const reader = await flagHeavyReader(sql, visitor);
   if (reader) await raiseAlert(sql, heavyReaderMessage(reader));
+}
+
+async function watchRefused(
+  sql: QuerySql,
+  visitor: string,
+  kind: RefusableKind,
+  refusedCost: number,
+  retryAfter: number,
+): Promise<void> {
+  const served = await servedToVisitor(sql, visitor, kind);
+  if (served === null) return;
+  await raiseAlert(
+    sql,
+    refusedVisitorMessage({ kind, served, refusedCost, retryAfter }),
+    "refused",
+  );
 }
 
 // True when the 429 has been sent and the caller must return. While
@@ -209,6 +230,17 @@ export async function detailRateLimitOrRespond(
   limits: Limits = configuredDetail(),
 ): Promise<boolean> {
   return rateLimitOrRespond(sql, req, res, 1, limits, "detail");
+}
+
+// Per-IP bucket for an unauthenticated write route; `route` names the bucket.
+export async function writeRateLimitOrRespond(
+  sql: QuerySql | null | undefined,
+  req: RequestWithHeaders,
+  res: RateLimitResponse,
+  route: string,
+  limits: Limits,
+): Promise<boolean> {
+  return rateLimitOrRespond(sql, req, res, 1, limits, `write:${route}`);
 }
 
 // One Gelato quote costs one token from a bucket of its own.
@@ -258,6 +290,9 @@ async function rateLimitOrRespond(
     1,
     Math.ceil(Math.min(cost, limits.capacity) / limits.refill_per_sec),
   );
+  if (deniedToday === cost && (kind === "items" || kind === "quote")) {
+    await watchRefused(sql, visitor, kind, cost, retryAfter);
+  }
   res.statusCode = 429;
   res.setHeader("Retry-After", String(retryAfter));
   res.setHeader("Cache-Control", "no-store");
