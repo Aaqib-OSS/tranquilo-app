@@ -19,6 +19,13 @@ async function openFirstStoryline(page: Page) {
     const chip = page.locator("#feed .slide").nth(i).locator(".storyline-chip");
     if (await chip.count()) {
       await chip.click();
+      // The storyline loads in the background behind an empty skeleton.
+      // Wait for it to finish, or callers inspect the skeleton instead of
+      // the real chapters.
+      await expect(
+        page.locator("#storylineTrack .storyline-loading"),
+      ).toHaveCount(0);
+      await expect(page.locator("#storylineHeaderTitle")).not.toBeEmpty();
       return i;
     }
   }
