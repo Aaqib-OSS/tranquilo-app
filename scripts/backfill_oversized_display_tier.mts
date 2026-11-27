@@ -79,7 +79,7 @@ async function main() {
       continue;
     }
 
-    let newBuf: any, newContentType: any;
+    let newBuf: Buffer, newContentType: string;
     try {
       const webpBuf = await sharp(got.body)
         .resize({

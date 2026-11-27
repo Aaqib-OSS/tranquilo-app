@@ -79,7 +79,7 @@ async function doList() {
   assertToken();
   const { list } = await import("@vercel/blob");
   const items: BlobManifestItem[] = [];
-  let cursor: any;
+  let cursor: string | undefined;
   do {
     const page = await list({ prefix: "img-cache/", cursor, limit: 1000 });
     for (const b of page.blobs) {

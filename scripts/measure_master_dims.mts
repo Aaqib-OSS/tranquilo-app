@@ -57,8 +57,8 @@ async function runCli() {
       console.error(`STOPPED: ${result.stoppedBy}`);
       process.exit(1);
     }
-  } catch (e: any) {
-    console.error("FATAL", e?.message || e);
+  } catch (e: unknown) {
+    console.error("FATAL", e instanceof Error ? e.message : e);
     process.exit(1);
   }
 }

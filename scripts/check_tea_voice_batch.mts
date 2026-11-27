@@ -34,8 +34,9 @@ for (const l of fs
 }
 const sql = neon(process.env.DATABASE_URL!);
 
-const drafts = JSON.parse(fs.readFileSync(path.resolve(file), "utf8"));
-const keys = drafts.map((d: any) => `${d.source}:${d.native_id}`);
+const drafts: (check.Draft & { source: string; native_id: string })[] =
+  JSON.parse(fs.readFileSync(path.resolve(file), "utf8"));
+const keys = drafts.map((d) => `${d.source}:${d.native_id}`);
 
 // The stored url is the authority. Fetched fresh rather than trusted from the
 // draft -- the whole point is that the draft's links cannot be believed.

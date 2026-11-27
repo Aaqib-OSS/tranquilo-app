@@ -30,6 +30,7 @@ import {
   planFromMap,
   type SpellingCount,
 } from "../lib/artist-canonical.ts";
+import type { SubjectGroup } from "../lib/ulan-extract.ts";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STORE = path.join(ROOT, "data/reference/ulan-artists.json");
@@ -106,8 +107,10 @@ for (const line of fs
 const sql = neon(process.env.DATABASE_URL!);
 
 async function planFromUlanMerges(): Promise<PlanEntry[]> {
-  const { merges } = JSON.parse(fs.readFileSync(STORE, "utf8"));
-  const groups = (merges || []).filter((g: any) => g.ourNames.length > 1);
+  const { merges }: { merges?: SubjectGroup[] } = JSON.parse(
+    fs.readFileSync(STORE, "utf8"),
+  );
+  const groups = (merges || []).filter((g) => g.ourNames.length > 1);
   console.log(`${groups.length} merge group(s) from ULAN\n`);
 
   const plan: PlanEntry[] = [];
